@@ -35,12 +35,6 @@ func main() {
 		token = "Bot " + token
 	}
 
-	// GUILD_ID and DEV_MODE are optional. If DEV_MODE=true and GUILD_ID is set,
-	// slash commands are registered guild-specifically for faster iteration.
-	// Otherwise they are registered globally (up to 1h propagation).
-	devGuildID := os.Getenv("GUILD_ID")
-	devMode := os.Getenv("DEV_MODE") == "true"
-
 	dbPath := os.Getenv("DATABASE_PATH")
 	if dbPath == "" {
 		dbPath = "data/doro.db"
@@ -51,7 +45,7 @@ func main() {
 	}
 	defer database.Close()
 
-	b, err := bot.New(token, database, commands.Commands, devGuildID, devMode)
+	b, err := bot.New(token, database, commands.Commands)
 	if err != nil {
 		log.Fatalf("Failed to initialize bot: %v", err)
 	}
