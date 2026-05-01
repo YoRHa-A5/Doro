@@ -7,17 +7,14 @@ package bot
 
 import (
 	"log"
-	"regexp"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/YoRHa-A5/Doro/internal/commands"
 	"github.com/YoRHa-A5/Doro/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/emoji"
 	"github.com/YoRHa-A5/Doro/internal/scanner"
 )
-
-// Matches animated and static custom Discord emoji format: <a?:name:id>.
-var customEmojiRegex = regexp.MustCompile(`<a?:([a-zA-Z0-9_]+):(\d+)>`)
 
 // Bot manages the Discord session and its dependencies.
 type Bot struct {
@@ -114,11 +111,9 @@ func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		return
 	}
 
-	matches := customEmojiRegex.FindAllStringSubmatch(m.Content, -1)
-	for _, match := range matches {
-		name := match[1]
-		emojiID := match[2]
-		if err := b.db.UpsertEmojiUsage(m.GuildID, name, emojiID, m.Author.ID, m.ChannelID, 1); err != nil {
+	emojis := emoji.Parse(m.Content)
+	for _, em := range emojis {
+		if err := b.db.UpsertEmojiUsage(m.GuildID, em.Name, em.ID, m.Author.ID, m.ChannelID, 1); err != nil {
 			log.Printf("Failed to upsert emoji usage: %v", err)
 		}
 	}

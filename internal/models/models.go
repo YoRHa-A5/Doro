@@ -52,15 +52,12 @@ type EmojiStat struct {
 
 // ChannelStat is returned by queries that aggregate message counts per channel.
 type ChannelStat struct {
-	ChannelID   string
-	ChannelName string
-	Count       int
+	ChannelID string
+	Count     int
 }
 
 // UserActivityStat is returned by queries that aggregate message counts per user.
 type UserActivityStat struct {
-	UserID      string
-	UserName    string
-	DisplayName string
-	Count       int
+	UserID string
+	Count  int
 }

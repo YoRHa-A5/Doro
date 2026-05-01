@@ -10,17 +10,13 @@ package scanner
 
 import (
 	"log"
-	"regexp"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/YoRHa-A5/Doro/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/emoji"
 )
-
-// Matches both animated (<a:name:id>) and static (<:name:id>) custom Discord emojis.
-// Capturing groups: [1]=emoji name, [2]=emoji ID.
-var customEmojiRegex = regexp.MustCompile(`<a?:([a-zA-Z0-9_]+):(\d+)>`)
 
 // Scanner persists emoji and message data by scanning a guild's message history.
 type Scanner struct {
@@ -125,11 +121,9 @@ func (s *Scanner) processMessage(guildID, channelID string, msg *discordgo.Messa
 		return
 	}
 
-	matches := customEmojiRegex.FindAllStringSubmatch(msg.Content, -1)
-	for _, match := range matches {
-		name := match[1]
-		emojiID := match[2]
-		if err := s.db.UpsertEmojiUsage(guildID, name, emojiID, msg.Author.ID, channelID, 1); err != nil {
+	parsed := emoji.Parse(msg.Content)
+	for _, em := range parsed {
+		if err := s.db.UpsertEmojiUsage(guildID, em.Name, em.ID, msg.Author.ID, channelID, 1); err != nil {
 			s.log("[Scanner] Failed to upsert emoji usage: %v", err)
 		}
 	}

@@ -11,13 +11,10 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-
-	"github.com/YoRHa-A5/Doro/internal/db"
 )
 
 // embedColor is the Discord "blurple" colour used in all bot embeds (0x5865F2).
 const embedColor = 0x5865F2
-const zeroWidthSpace = "\u200b"
 
 // Commands is the list of slash commands registered with Discord.
 // Each command is defined here and registered in bot.New().
@@ -144,10 +141,10 @@ func respondWithEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, embe
 
 // HandleEmojiStats responds with an embed listing the top 10 most-used emojis
 // across the entire server (all time). Emoji counts are aggregated per emoji ID.
-func HandleEmojiStats(s *discordgo.Session, i *discordgo.InteractionCreate, database *db.DB) {
+func HandleEmojiStats(s *discordgo.Session, i *discordgo.InteractionCreate, store StatsStore) {
 	guildID := i.GuildID
 
-	stats, err := database.GetTopEmojis(guildID, 10)
+	stats, err := store.GetTopEmojis(guildID, 10)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
@@ -184,106 +181,74 @@ func HandleEmojiStats(s *discordgo.Session, i *discordgo.InteractionCreate, data
 // HandleRecapUser responds with an embed for the invoking user covering the
 // selected timespan. It shows: top 3 emojis used, top 3 channels by message
 // count, and total message count.
-func HandleRecapUser(s *discordgo.Session, i *discordgo.InteractionCreate, database *db.DB) {
+func HandleRecapUser(s *discordgo.Session, i *discordgo.InteractionCreate, store StatsStore) {
 	guildID := i.GuildID
 	userID := i.Member.User.ID
 
-	options := i.ApplicationCommandData().Options
-	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption)
-	for _, opt := range options {
-		optionMap[opt.Name] = opt
-	}
-
-	tsOption, ok := optionMap["timespan"]
-	if !ok {
+	tsOption, since := ParseTimespan(i.ApplicationCommandData().Options)
+	if tsOption == "" {
 		return
 	}
-	timespan := tsOption.StringValue()
-	since := time.Now().Add(-timespanToDuration(timespan))
 
-	emojis, err := database.GetUserTopEmojis(guildID, userID, since, 3)
+	emojis, err := store.GetUserTopEmojis(guildID, userID, since, 3)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
-	channels, err := database.GetUserTopChannels(guildID, userID, since, 3)
+	channels, err := store.GetUserTopChannels(guildID, userID, since, 3)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
-	msgCount, err := database.GetUserMessageCount(guildID, userID, since)
+	msgCount, err := store.GetUserMessageCount(guildID, userID, since)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("%s Recap for %s", timespanToAdverb(timespan), displayUsername(i.Member.User)),
-		Description: fmt.Sprintf("Activity stats for the past %s", timespan),
+		Title:       fmt.Sprintf("%s Recap for %s", timespanToAdverb(tsOption), displayUsername(i.Member.User)),
+		Description: fmt.Sprintf("Activity stats for the past %s", tsOption),
 		Color:       embedColor,
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
-	// Three columns side by side: one header row, then value rows below.
-	// Empty Name on subsequent rows tells Discord to merge into the same column.
+	// Build the inline grid: each row has [emoji, channel, messages].
+	// The third column (Total Messages) only shows on row 1.
 	maxLen := max(len(emojis), len(channels), 1)
-
-	// Row 0: headers
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-		Name:   "Top Emojis",
-		Value:  "",
-		Inline: true,
-	}, &discordgo.MessageEmbedField{
-		Name:   "Top Channels",
-		Value:  "",
-		Inline: true,
-	}, &discordgo.MessageEmbedField{
-		Name:   "Total Messages",
-		Value:  "",
-		Inline: true,
-	})
-
-	for rowIdx := 1; rowIdx < maxLen; rowIdx++ {
+	var rows [][]string
+	for rowIdx := 0; rowIdx < maxLen; rowIdx++ {
 		var valEmojis string
-		if rowIdx-1 < len(emojis) {
-			valEmojis = fmt.Sprintf("**%s**\nused %d times", emojiMention(emojis[rowIdx-1].EmojiName, emojis[rowIdx-1].EmojiID), emojis[rowIdx-1].Count)
+		if rowIdx < len(emojis) {
+			valEmojis = fmt.Sprintf("**%s**\nused %d times", emojiMention(emojis[rowIdx].EmojiName, emojis[rowIdx].EmojiID), emojis[rowIdx].Count)
 		} else {
 			valEmojis = zeroWidthSpace
 		}
 
 		var valChannels string
-		if rowIdx-1 < len(channels) {
-			valChannels = fmt.Sprintf("**#%s**\n%d messages", resolveChannelName(s, channels[rowIdx-1].ChannelID), channels[rowIdx-1].Count)
+		if rowIdx < len(channels) {
+			valChannels = fmt.Sprintf("**#%s**\n%d messages", resolveChannelName(s, channels[rowIdx].ChannelID), channels[rowIdx].Count)
 		} else {
 			valChannels = zeroWidthSpace
 		}
 
-		// Third column: single value (user's total message count)
-		valMessages := ""
-		if rowIdx == 1 {
+		var valMessages string
+		if rowIdx == 0 {
 			valMessages = fmt.Sprintf("%d", msgCount)
 		} else {
 			valMessages = zeroWidthSpace
 		}
 
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valEmojis,
-			Inline: true,
-		})
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valChannels,
-			Inline: true,
-		})
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valMessages,
-			Inline: true,
-		})
+		rows = append(rows, []string{valEmojis, valChannels, valMessages})
 	}
+
+	embed.Fields = BuildInlineGrid([]GridHeader{
+		{Name: "Top Emojis"},
+		{Name: "Top Channels"},
+		{Name: "Total Messages"},
+	}, rows)
 
 	respondWithEmbed(s, i, embed)
 }
@@ -291,118 +256,86 @@ func HandleRecapUser(s *discordgo.Session, i *discordgo.InteractionCreate, datab
 // HandleRecapServer responds with an embed covering the selected timespan at
 // server level. It shows: top 5 emojis, top 5 channels by message count, and
 // top 5 users by message count.
-func HandleRecapServer(s *discordgo.Session, i *discordgo.InteractionCreate, database *db.DB) {
+func HandleRecapServer(s *discordgo.Session, i *discordgo.InteractionCreate, store StatsStore) {
 	guildID := i.GuildID
 
-	options := i.ApplicationCommandData().Options
-	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption)
-	for _, opt := range options {
-		optionMap[opt.Name] = opt
-	}
-
-	tsOption, ok := optionMap["timespan"]
-	if !ok {
+	tsOption, since := ParseTimespan(i.ApplicationCommandData().Options)
+	if tsOption == "" {
 		return
 	}
-	timespan := tsOption.StringValue()
-	since := time.Now().Add(-timespanToDuration(timespan))
 
-	emojis, err := database.GetServerTopEmojis(guildID, since, 5)
+	emojis, err := store.GetServerTopEmojis(guildID, since, 5)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
-	channels, err := database.GetServerTopChannels(guildID, since, 5)
+	channels, err := store.GetServerTopChannels(guildID, since, 5)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
-	users, err := database.GetServerTopUsers(guildID, since, 5)
+	users, err := store.GetServerTopUsers(guildID, since, 5)
 	if err != nil {
 		databaseGetError(s, i, err)
 		return
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("Server %s Recap", capitalize(timespan)),
-		Description: fmt.Sprintf("Activity stats for the past %s", timespan),
+		Title:       fmt.Sprintf("Server %s Recap", capitalize(tsOption)),
+		Description: fmt.Sprintf("Activity stats for the past %s", tsOption),
 		Color:       embedColor,
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
-	// Three columns side by side: one header row, then value rows below.
-	// Empty Name on subsequent rows tells Discord to merge into the same column.
+	// Build the inline grid: each row has [emoji, channel, user].
 	maxLen := max(len(emojis), len(channels), len(users))
-
-	// Row 0: headers
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-		Name:   "Top Emojis",
-		Value:  "",
-		Inline: true,
-	}, &discordgo.MessageEmbedField{
-		Name:   "Top Channels",
-		Value:  "",
-		Inline: true,
-	}, &discordgo.MessageEmbedField{
-		Name:   "Top Users",
-		Value:  "",
-		Inline: true,
-	})
-
-	for rowIdx := 1; rowIdx < maxLen; rowIdx++ {
+	var rows [][]string
+	for rowIdx := 0; rowIdx < maxLen; rowIdx++ {
 		var valEmojis string
-		if rowIdx-1 < len(emojis) {
-			valEmojis = fmt.Sprintf("**%s**\nused %d times", emojiMention(emojis[rowIdx-1].EmojiName, emojis[rowIdx-1].EmojiID), emojis[rowIdx-1].Count)
+		if rowIdx < len(emojis) {
+			valEmojis = fmt.Sprintf("**%s**\nused %d times", emojiMention(emojis[rowIdx].EmojiName, emojis[rowIdx].EmojiID), emojis[rowIdx].Count)
 		} else {
 			valEmojis = zeroWidthSpace
 		}
 
 		var valChannels string
-		if rowIdx-1 < len(channels) {
-			valChannels = fmt.Sprintf("**#%s**\n%d messages", resolveChannelName(s, channels[rowIdx-1].ChannelID), channels[rowIdx-1].Count)
+		if rowIdx < len(channels) {
+			valChannels = fmt.Sprintf("**#%s**\n%d messages", resolveChannelName(s, channels[rowIdx].ChannelID), channels[rowIdx].Count)
 		} else {
 			valChannels = zeroWidthSpace
 		}
 
 		var valUsers string
-		if rowIdx-1 < len(users) {
-			valUsers = fmt.Sprintf("**%s**\n%d messages", resolveUserDisplayName(s, guildID, users[rowIdx-1].UserID), users[rowIdx-1].Count)
+		if rowIdx < len(users) {
+			valUsers = fmt.Sprintf("**%s**\n%d messages", resolveUserDisplayName(s, guildID, users[rowIdx].UserID), users[rowIdx].Count)
 		} else {
 			valUsers = zeroWidthSpace
 		}
 
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valEmojis,
-			Inline: true,
-		})
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valChannels,
-			Inline: true,
-		})
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "",
-			Value:  valUsers,
-			Inline: true,
-		})
+		rows = append(rows, []string{valEmojis, valChannels, valUsers})
 	}
+
+	embed.Fields = BuildInlineGrid([]GridHeader{
+		{Name: "Top Emojis"},
+		{Name: "Top Channels"},
+		{Name: "Top Users"},
+	}, rows)
 
 	respondWithEmbed(s, i, embed)
 }
 
 // HandleInteraction dispatches an interaction to the appropriate command handler
 // based on the command name.
-func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, database *db.DB) {
+func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, store StatsStore) {
 	switch i.ApplicationCommandData().Name {
 	case "emoji-stats":
-		HandleEmojiStats(s, i, database)
+		HandleEmojiStats(s, i, store)
 	case "recap-user":
-		HandleRecapUser(s, i, database)
+		HandleRecapUser(s, i, store)
 	case "recap-server":
-		HandleRecapServer(s, i, database)
+		HandleRecapServer(s, i, store)
 	}
 }
 
