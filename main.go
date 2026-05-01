@@ -41,7 +41,11 @@ func main() {
 	devGuildID := os.Getenv("GUILD_ID")
 	devMode := os.Getenv("DEV_MODE") == "true"
 
-	database, err := db.New("data/doro.db")
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "data/doro.db"
+	}
+	database, err := db.New(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
