@@ -1,4 +1,4 @@
-// Doromoge is a Discord bot that tracks custom emoji usage and message counts
+// Doro is a Discord bot that tracks custom emoji usage and message counts
 // per user, channel, and server over time.
 //
 // It persists data to SQLite and provides three slash commands:
@@ -35,12 +35,6 @@ func main() {
 		token = "Bot " + token
 	}
 
-	// GUILD_ID and DEV_MODE are optional. If DEV_MODE=true and GUILD_ID is set,
-	// slash commands are registered guild-specifically for faster iteration.
-	// Otherwise they are registered globally (up to 1h propagation).
-	devGuildID := os.Getenv("GUILD_ID")
-	devMode := os.Getenv("DEV_MODE") == "true"
-
 	dbPath := os.Getenv("DATABASE_PATH")
 	if dbPath == "" {
 		dbPath = "data/doro.db"
@@ -51,13 +45,13 @@ func main() {
 	}
 	defer database.Close()
 
-	b, err := bot.New(token, database, commands.Commands, devGuildID, devMode)
+	b, err := bot.New(token, database, commands.Commands)
 	if err != nil {
 		log.Fatalf("Failed to initialize bot: %v", err)
 	}
 	defer b.Close()
 
-	log.Println("Doromoge is running. Press Ctrl+C to exit.")
+	log.Println("Doro is running. Press Ctrl+C to exit.")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)

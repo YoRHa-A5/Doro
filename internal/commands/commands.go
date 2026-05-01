@@ -7,6 +7,7 @@ package commands
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -348,6 +349,7 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, sto
 		return
 	}
 	cooldown.Set(userID, commandName)
+	log.Printf("[Command] /%s used by %s (%s) - interaction %s", commandName, displayUsername(i.Member.User), userID, i.ID)
 
 	switch commandName {
 	case "emoji-stats":

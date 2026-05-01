@@ -18,26 +18,24 @@ import (
 
 // Bot manages the Discord session and its dependencies.
 type Bot struct {
-	session     *discordgo.Session
-	db          *db.DB
-	scanner     *scanner.Scanner
-	commands    []*discordgo.ApplicationCommand
-	devGuildID  string
-	devMode     bool
+	session    *discordgo.Session
+	db         *db.DB
+	scanner    *scanner.Scanner
+	commands   []*discordgo.ApplicationCommand
 	initialized bool
 }
 
 // New creates a new bot: initializes the Discord session, opens the websocket,
-// and sets up event handlers. Slash commands are registered when the Ready
-// event fires, ensuring the bot's application ID is populated for REST calls.
-func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand, devGuildID string, devMode bool) (*Bot, error) {
+// and sets up event handlers. Commands are registered per-guild when the bot
+// joins a server (not globally on startup).
+func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand) (*Bot, error) {
 	session, err := discordgo.New(token)
 	if err != nil {
 		return nil, err
 	}
 
 	// Intents: message content to parse emojis, guild messages to receive them,
-	// and guilds to receive GuildCreate events when joining a server.
+	// and guilds to receive GuildCreate/GuildDelete events.
 	session.Identify.Intents = discordgo.IntentsGuildMessages |
 		discordgo.IntentsMessageContent |
 		discordgo.IntentsGuilds
@@ -47,14 +45,13 @@ func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand
 		db:         database,
 		scanner:    scanner.New(database),
 		commands:   commands,
-		devGuildID: devGuildID,
-		devMode:    devMode,
 	}
 
 	// Register the Ready handler before opening the session so we don't miss it.
 	session.AddHandler(b.handleReady)
 	session.AddHandler(b.handleMessageCreate)
 	session.AddHandler(b.handleGuildCreate)
+	session.AddHandler(b.handleGuildDelete)
 	session.AddHandler(b.handleInteractionCreate)
 
 	if err := session.Open(); err != nil {
@@ -65,36 +62,45 @@ func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand
 }
 
 // handleReady fires once when the bot has connected and is identified.
-// At this point session.State.User is populated, so we can safely register
-// slash commands via the REST API without 401 errors.
 func (b *Bot) handleReady(s *discordgo.Session, event *discordgo.Ready) {
 	if b.initialized {
 		return
 	}
 	b.initialized = true
-
-	b.registerCommands()
 }
 
-// registerCommands registers slash commands with Discord. If devMode is enabled
-// and devGuildID is set, commands are registered guild-specifically for instant
-// propagation. Otherwise they are registered globally (up to 1h to propagate).
-func (b *Bot) registerCommands() {
+// registerCommandsForGuild registers all commands for a specific guild.
+// Guild-scoped commands propagate instantly (vs up to 1h for global).
+func (b *Bot) registerCommandsForGuild(guildID string) {
 	for _, cmd := range b.commands {
-		var err error
-		if b.devMode && b.devGuildID != "" {
-			_, err = b.session.ApplicationCommandCreate(b.session.State.User.ID, b.devGuildID, cmd)
-			if err == nil {
-				log.Printf("Registered command %s guild-specific (DEV_MODE)", cmd.Name)
-			}
-		} else {
-			_, err = b.session.ApplicationCommandCreate(b.session.State.User.ID, "", cmd)
-			if err == nil {
-				log.Printf("Registered command %s globally", cmd.Name)
-			}
-		}
+		_, err := b.session.ApplicationCommandCreate(
+			b.session.State.User.ID, guildID, cmd,
+		)
 		if err != nil {
-			log.Printf("Failed to register command %s: %v", cmd.Name, err)
+			log.Printf("Failed to register command %s in guild %s: %v", cmd.Name, guildID, err)
+		} else {
+			log.Printf("Registered command %s in guild %s", cmd.Name, guildID)
+		}
+	}
+}
+
+// unregisterCommandsForGuild removes all bot commands from a specific guild.
+func (b *Bot) unregisterCommandsForGuild(guildID string) {
+	// Fetch all commands for this guild
+	cmds, err := b.session.ApplicationCommands(b.session.State.User.ID, guildID)
+	if err != nil {
+		log.Printf("Failed to fetch commands for guild %s: %v", guildID, err)
+		return
+	}
+
+	for _, cmd := range cmds {
+		err := b.session.ApplicationCommandDelete(
+			b.session.State.User.ID, guildID, cmd.ID,
+		)
+		if err != nil {
+			log.Printf("Failed to delete command %s from guild %s: %v", cmd.Name, guildID, err)
+		} else {
+			log.Printf("Deleted command %s from guild %s", cmd.Name, guildID)
 		}
 	}
 }
@@ -123,15 +129,21 @@ func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 }
 
-// handleGuildCreate triggers a bulk scan when the bot joins a new guild.
-// It only scans if the guild is not already in the database (prevents re-scans
-// on reconnects). The scan runs asynchronously.
+// handleGuildCreate registers commands and triggers a bulk scan when the bot
+// joins a new guild.
 func (b *Bot) handleGuildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
-	if b.db.GuildScanned(event.Guild.ID) {
-		return
-	}
+	// Register commands for this guild
+	b.registerCommandsForGuild(event.Guild.ID)
 
-	go b.scanner.ScanGuild(event.Guild.ID, s)
+	// Initial scan if not already done
+	if !b.db.GuildScanned(event.Guild.ID) {
+		go b.scanner.ScanGuild(event.Guild.ID, s)
+	}
+}
+
+// handleGuildDelete cleans up commands when the bot leaves a guild.
+func (b *Bot) handleGuildDelete(s *discordgo.Session, event *discordgo.GuildDelete) {
+	b.unregisterCommandsForGuild(event.Guild.ID)
 }
 
 // handleInteractionCreate routes slash command interactions to their respective
