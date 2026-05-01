@@ -1,4 +1,4 @@
-// Doromoge is a Discord bot that tracks custom emoji usage and message counts
+// Doro is a Discord bot that tracks custom emoji usage and message counts
 // per user, channel, and server over time.
 //
 // It persists data to SQLite and provides three slash commands:
@@ -57,7 +57,7 @@ func main() {
 	}
 	defer b.Close()
 
-	log.Println("Doromoge is running. Press Ctrl+C to exit.")
+	log.Println("Doro is running. Press Ctrl+C to exit.")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)
