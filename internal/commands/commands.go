@@ -158,7 +158,6 @@ func HandleEmojiStats(s *discordgo.Session, i *discordgo.InteractionCreate, stor
 		Title:       "Top 10 Server Emojis",
 		Description: zeroWidthSpace,
 		Color:       embedColor,
-		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
 	fields := make([]*discordgo.MessageEmbedField, 0, len(stats))
@@ -216,7 +215,6 @@ func HandleRecapUser(s *discordgo.Session, i *discordgo.InteractionCreate, store
 		Title:       fmt.Sprintf("%s Recap for %s", timespanToAdverb(tsOption), displayUsername(i.Member.User)),
 		Description: fmt.Sprintf("Activity stats for the past %s", tsOption),
 		Color:       embedColor,
-		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
 	// Build the inline grid: each row has [emoji, channel, messages].
@@ -290,7 +288,6 @@ func HandleRecapServer(s *discordgo.Session, i *discordgo.InteractionCreate, sto
 		Title:       fmt.Sprintf("Server %s Recap", capitalize(tsOption)),
 		Description: fmt.Sprintf("Activity stats for the past %s", tsOption),
 		Color:       embedColor,
-		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
 	// Build the inline grid: each row has [emoji, channel, user].
