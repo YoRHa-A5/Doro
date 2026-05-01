@@ -1,4 +1,4 @@
-module github.com/YoRHa-A5/doromoge
+module github.com/YoRHa-A5/Doro
 
 go 1.26.2
 

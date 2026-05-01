@@ -15,7 +15,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/YoRHa-A5/doromoge/internal/models"
+	"github.com/YoRHa-A5/Doro/internal/models"
 )
 
 // DB wraps sql.DB with typed helper methods for the bot's data model.

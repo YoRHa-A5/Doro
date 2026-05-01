@@ -18,9 +18,9 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/YoRHa-A5/doromoge/internal/bot"
-	"github.com/YoRHa-A5/doromoge/internal/commands"
-	"github.com/YoRHa-A5/doromoge/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/bot"
+	"github.com/YoRHa-A5/Doro/internal/commands"
+	"github.com/YoRHa-A5/Doro/internal/db"
 )
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
 	devGuildID := os.Getenv("GUILD_ID")
 	devMode := os.Getenv("DEV_MODE") == "true"
 
-	database, err := db.New("data/doromoge.db")
+	database, err := db.New("data/doro.db")
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}

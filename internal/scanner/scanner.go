@@ -15,7 +15,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/YoRHa-A5/doromoge/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/db"
 )
 
 // Matches both animated (<a:name:id>) and static (<:name:id>) custom Discord emojis.

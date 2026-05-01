@@ -11,9 +11,9 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/YoRHa-A5/doromoge/internal/commands"
-	"github.com/YoRHa-A5/doromoge/internal/db"
-	"github.com/YoRHa-A5/doromoge/internal/scanner"
+	"github.com/YoRHa-A5/Doro/internal/commands"
+	"github.com/YoRHa-A5/Doro/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/scanner"
 )
 
 // Matches animated and static custom Discord emoji format: <a?:name:id>.

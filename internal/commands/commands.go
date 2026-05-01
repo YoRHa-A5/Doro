@@ -12,7 +12,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/YoRHa-A5/doromoge/internal/db"
+	"github.com/YoRHa-A5/Doro/internal/db"
 )
 
 // embedColor is the Discord "blurple" colour used in all bot embeds (0x5865F2).
