@@ -51,14 +51,16 @@ func (s *Scanner) ScanGuild(guildID string, session *discordgo.Session) {
 		}
 	}
 
-	s.log("[Scanner] Found %d text channels in guild %s", len(textChannels), guildID)
+	guild, _ := session.Guild(guildID)
+
+	s.log("[Scanner] Found %d text channels in guild %s (%s)", len(textChannels), guild.Name, guildID)
 
 	since := time.Now().AddDate(0, 0, -30)
 
 	for i, ch := range textChannels {
-		s.log("[Scanner] Scanning channel %d/%d: %s", i+1, len(textChannels), ch.ID)
+		s.log("[Scanner] Scanning channel %d/%d: #%s (%s)", i+1, len(textChannels), ch.Name, ch.ID)
 		count := s.scanChannel(guildID, ch.ID, since, session)
-		s.log("[Scanner] Scanned %d messages in channel %s", count, ch.ID)
+		s.log("[Scanner] Scanned %d messages in channel #%s (%s)", count, ch.Name, ch.ID)
 
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -68,7 +70,7 @@ func (s *Scanner) ScanGuild(guildID string, session *discordgo.Session) {
 		return
 	}
 
-	s.log("[Scanner] Guild %s scan complete", guildID)
+	s.log("[Scanner] Guild %s (%s) scan complete", guild.Name, guildID)
 }
 
 // scanChannel paginates through message history using beforeID cursors.
