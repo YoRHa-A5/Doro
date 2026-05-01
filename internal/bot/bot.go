@@ -35,9 +35,11 @@ func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand
 	}
 
 	// Intents: message content to parse emojis, guild messages to receive them,
-	// and guilds to receive GuildCreate/GuildDelete events.
+	// reactions to count emoji reactions, and guilds to receive
+	// GuildCreate/GuildDelete events.
 	session.Identify.Intents = discordgo.IntentsGuildMessages |
 		discordgo.IntentsMessageContent |
+		discordgo.IntentsGuildMessageReactions |
 		discordgo.IntentsGuilds
 
 	b := &Bot{
@@ -50,6 +52,7 @@ func New(token string, database *db.DB, commands []*discordgo.ApplicationCommand
 	// Register the Ready handler before opening the session so we don't miss it.
 	session.AddHandler(b.handleReady)
 	session.AddHandler(b.handleMessageCreate)
+	session.AddHandler(b.handleMessageReactionAdd)
 	session.AddHandler(b.handleGuildCreate)
 	session.AddHandler(b.handleGuildDelete)
 	session.AddHandler(b.handleInteractionCreate)
@@ -126,6 +129,24 @@ func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 
 	if err := b.db.UpsertMessageCount(m.GuildID, m.ChannelID, m.Author.ID); err != nil {
 		log.Printf("Failed to upsert message count: %v", err)
+	}
+}
+
+// handleMessageReactionAdd processes emoji reactions on messages.
+// Custom emoji reactions are counted toward the emoji's usage statistics.
+// Unicode emoji reactions are skipped (no ID, not custom).
+func (b *Bot) handleMessageReactionAdd(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
+	if m.UserID == s.State.User.ID || m.GuildID == "" {
+		return
+	}
+
+	// Skip unicode emojis — they have no ID
+	if m.Emoji.ID == "" {
+		return
+	}
+
+	if err := b.db.UpsertEmojiUsage(m.GuildID, m.Emoji.Name, m.Emoji.ID, m.UserID, m.ChannelID, 1); err != nil {
+		log.Printf("Failed to upsert emoji reaction: %v", err)
 	}
 }
 
