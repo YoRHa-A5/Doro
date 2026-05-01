@@ -16,6 +16,9 @@ import (
 // embedColor is the Discord "blurple" colour used in all bot embeds (0x5865F2).
 const embedColor = 0x5865F2
 
+// cooldown is the package-level rate limiter for slash commands.
+var cooldown = NewCooldown()
+
 // Commands is the list of slash commands registered with Discord.
 // Each command is defined here and registered in bot.New().
 var Commands = []*discordgo.ApplicationCommand{
@@ -327,9 +330,26 @@ func HandleRecapServer(s *discordgo.Session, i *discordgo.InteractionCreate, sto
 }
 
 // HandleInteraction dispatches an interaction to the appropriate command handler
-// based on the command name.
+// based on the command name. Each command has an independent per-user cooldown
+// (default 60s) to prevent spam.
 func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, store StatsStore) {
-	switch i.ApplicationCommandData().Name {
+	commandName := i.ApplicationCommandData().Name
+	userID := i.Member.User.ID
+
+	remaining, ok := cooldown.Check(userID, commandName)
+	if !ok {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("⏳ You can use `/%s` again in %.0fs.", commandName, remaining.Seconds()),
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+	cooldown.Set(userID, commandName)
+
+	switch commandName {
 	case "emoji-stats":
 		HandleEmojiStats(s, i, store)
 	case "recap-user":
