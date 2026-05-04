@@ -70,6 +70,16 @@ func (b *Bot) handleReady(s *discordgo.Session, event *discordgo.Ready) {
 		return
 	}
 	b.initialized = true
+
+	s.UpdateStatusComplex(discordgo.UpdateStatusData{
+		Activities: []*discordgo.Activity{
+			{
+				Name: "is watching you 👀",
+				Type: discordgo.ActivityTypeWatching,
+			},
+		},
+		Status: "online",
+	})
 }
 
 // registerCommandsForGuild registers all commands for a specific guild.
