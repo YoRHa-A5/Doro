@@ -125,12 +125,12 @@ func (s *Scanner) processMessage(guildID, channelID string, msg *discordgo.Messa
 
 	parsed := emoji.Parse(msg.Content)
 	for _, em := range parsed {
-		if err := s.db.UpsertEmojiUsage(guildID, em.Name, em.ID, msg.Author.ID, channelID, 1); err != nil {
+		if err := s.db.UpsertEmojiUsageAt(guildID, em.Name, em.ID, msg.Author.ID, channelID, 1, msg.Timestamp); err != nil {
 			s.log("[Scanner] Failed to upsert emoji usage: %v", err)
 		}
 	}
 
-	if err := s.db.UpsertMessageCount(guildID, channelID, msg.Author.ID); err != nil {
+	if err := s.db.UpsertMessageCountAt(guildID, channelID, msg.Author.ID, msg.Timestamp); err != nil {
 		s.log("[Scanner] Failed to upsert message count: %v", err)
 	}
 }

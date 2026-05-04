@@ -52,10 +52,10 @@ func New(dbPath string) (*DB, error) {
 //
 // Schema:
 //   - [guilds]     — one row per scanned guild, guards against duplicate scans
-//   - [emoji_usage]— per-emoji per-user per-channel usage counters; UNIQUE on
-//                    (guild_id, emoji_id, user_id, channel_id)
-//   - [message_counts] — per-channel per-user message counters; UNIQUE on
-//                    (guild_id, channel_id, user_id)
+//   - [emoji_usage]— per-emoji per-user per-channel per-day usage counters; UNIQUE on
+//                    (guild_id, emoji_id, user_id, channel_id, period_date)
+//   - [message_counts] — per-channel per-user per-day message counters; UNIQUE on
+//                    (guild_id, channel_id, user_id, period_date)
 func (d *DB) migrate() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS guilds (
@@ -71,9 +71,10 @@ func (d *DB) migrate() error {
 		user_id TEXT NOT NULL,
 		channel_id TEXT NOT NULL,
 		count INTEGER NOT NULL DEFAULT 0,
+		period_date TEXT NOT NULL,
 		first_used DATETIME,
 		last_used DATETIME,
-		UNIQUE(guild_id, emoji_id, user_id, channel_id)
+		UNIQUE(guild_id, emoji_id, user_id, channel_id, period_date)
 	);
 
 	CREATE TABLE IF NOT EXISTS message_counts (
@@ -82,9 +83,10 @@ func (d *DB) migrate() error {
 		channel_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
 		count INTEGER NOT NULL DEFAULT 0,
+		period_date TEXT NOT NULL,
 		first_seen DATETIME,
 		last_seen DATETIME,
-		UNIQUE(guild_id, channel_id, user_id)
+		UNIQUE(guild_id, channel_id, user_id, period_date)
 	);
 	`
 
@@ -110,31 +112,46 @@ func (d *DB) MarkGuildScanned(guildID string) error {
 }
 
 // UpsertEmojiUsage increments the usage count for one emoji used by one user
-// in one channel of one guild. On conflict the count is incremented by count
-// and last_used is updated to the current time. first_used is set only on insert.
+// in one channel of one guild for today's date. On conflict the count is
+// incremented by count and last_used is updated. first_used is set only on insert.
 func (d *DB) UpsertEmojiUsage(guildID, emojiName, emojiID, userID, channelID string, count int) error {
-	now := time.Now().UTC()
+	return d.UpsertEmojiUsageAt(guildID, emojiName, emojiID, userID, channelID, count, time.Now().UTC())
+}
+
+// UpsertEmojiUsageAt is like UpsertEmojiUsage but accepts an explicit timestamp
+// so the emoji usage is recorded under the message's actual date rather than today.
+func (d *DB) UpsertEmojiUsageAt(guildID, emojiName, emojiID, userID, channelID string, count int, ts time.Time) error {
+	now := ts.UTC()
+	day := now.Format("2006-01-02")
 	_, err := d.Exec(`
-		INSERT INTO emoji_usage (guild_id, emoji_name, emoji_id, user_id, channel_id, count, first_used, last_used)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(guild_id, emoji_id, user_id, channel_id) DO UPDATE SET
+		INSERT INTO emoji_usage (guild_id, emoji_name, emoji_id, user_id, channel_id, count, period_date, first_used, last_used)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(guild_id, emoji_id, user_id, channel_id, period_date) DO UPDATE SET
 			count = count + excluded.count,
 			last_used = excluded.last_used
-	`, guildID, emojiName, emojiID, userID, channelID, count, now, now)
+	`, guildID, emojiName, emojiID, userID, channelID, count, day, now, now)
 	return err
 }
 
 // UpsertMessageCount increments the message count for one user in one channel
-// of one guild. On conflict the count is incremented by 1 and last_seen is updated.
+// of one guild for today's date. On conflict the count is incremented by 1 and
+// last_seen is updated.
 func (d *DB) UpsertMessageCount(guildID, channelID, userID string) error {
-	now := time.Now().UTC()
+	return d.UpsertMessageCountAt(guildID, channelID, userID, time.Now().UTC())
+}
+
+// UpsertMessageCountAt is like UpsertMessageCount but accepts an explicit
+// timestamp so the message count is recorded under the message's actual date.
+func (d *DB) UpsertMessageCountAt(guildID, channelID, userID string, ts time.Time) error {
+	now := ts.UTC()
+	day := now.Format("2006-01-02")
 	_, err := d.Exec(`
-		INSERT INTO message_counts (guild_id, channel_id, user_id, count, first_seen, last_seen)
-		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(guild_id, channel_id, user_id) DO UPDATE SET
+		INSERT INTO message_counts (guild_id, channel_id, user_id, count, period_date, first_seen, last_seen)
+		VALUES (?, ?, ?, 1, ?, ?, ?)
+		ON CONFLICT(guild_id, channel_id, user_id, period_date) DO UPDATE SET
 			count = count + 1,
 			last_seen = excluded.last_seen
-	`, guildID, channelID, userID, now, now)
+	`, guildID, channelID, userID, day, now, now)
 	return err
 }
 
@@ -166,16 +183,17 @@ func (d *DB) GetTopEmojis(guildID string, limit int) ([]models.EmojiStat, error)
 }
 
 // GetUserTopEmojis returns the top [limit] most-used emojis by a specific user
-// in a guild since [since]. Uses last_used to filter by time.
+// in a guild since [since]. Uses period_date to filter by time.
 func (d *DB) GetUserTopEmojis(guildID, userID string, since time.Time, limit int) ([]models.EmojiStat, error) {
+	sinceDate := since.Format("2006-01-02")
 	rows, err := d.Query(`
 		SELECT emoji_name, emoji_id, SUM(count) as total
 		FROM emoji_usage
-		WHERE guild_id = ? AND user_id = ? AND last_used >= ?
+		WHERE guild_id = ? AND user_id = ? AND period_date >= ?
 		GROUP BY emoji_id
 		ORDER BY total DESC
 		LIMIT ?
-	`, guildID, userID, since, limit)
+	`, guildID, userID, sinceDate, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -193,16 +211,17 @@ func (d *DB) GetUserTopEmojis(guildID, userID string, since time.Time, limit int
 }
 
 // GetServerTopEmojis returns the top [limit] most-used emojis across a guild
-// since [since]. Uses last_used to filter by time.
+// since [since]. Uses period_date to filter by time.
 func (d *DB) GetServerTopEmojis(guildID string, since time.Time, limit int) ([]models.EmojiStat, error) {
+	sinceDate := since.Format("2006-01-02")
 	rows, err := d.Query(`
 		SELECT emoji_name, emoji_id, SUM(count) as total
 		FROM emoji_usage
-		WHERE guild_id = ? AND last_used >= ?
+		WHERE guild_id = ? AND period_date >= ?
 		GROUP BY emoji_id
 		ORDER BY total DESC
 		LIMIT ?
-	`, guildID, since, limit)
+	`, guildID, sinceDate, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -220,16 +239,17 @@ func (d *DB) GetServerTopEmojis(guildID string, since time.Time, limit int) ([]m
 }
 
 // GetUserTopChannels returns the top [limit] channels by message count for a
-// specific user in a guild since [since]. Uses last_seen to filter by time.
+// specific user in a guild since [since]. Uses period_date to filter by time.
 func (d *DB) GetUserTopChannels(guildID, userID string, since time.Time, limit int) ([]models.ChannelStat, error) {
+	sinceDate := since.Format("2006-01-02")
 	rows, err := d.Query(`
 		SELECT mc.channel_id, SUM(mc.count) as total
 		FROM message_counts mc
-		WHERE mc.guild_id = ? AND mc.user_id = ? AND mc.last_seen >= ?
+		WHERE mc.guild_id = ? AND mc.user_id = ? AND mc.period_date >= ?
 		GROUP BY mc.channel_id
 		ORDER BY total DESC
 		LIMIT ?
-	`, guildID, userID, since, limit)
+	`, guildID, userID, sinceDate, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -247,16 +267,17 @@ func (d *DB) GetUserTopChannels(guildID, userID string, since time.Time, limit i
 }
 
 // GetServerTopChannels returns the top [limit] channels by total message count
-// in a guild since [since]. Uses last_seen to filter by time.
+// in a guild since [since]. Uses period_date to filter by time.
 func (d *DB) GetServerTopChannels(guildID string, since time.Time, limit int) ([]models.ChannelStat, error) {
+	sinceDate := since.Format("2006-01-02")
 	rows, err := d.Query(`
 		SELECT channel_id, SUM(count) as total
 		FROM message_counts
-		WHERE guild_id = ? AND last_seen >= ?
+		WHERE guild_id = ? AND period_date >= ?
 		GROUP BY channel_id
 		ORDER BY total DESC
 		LIMIT ?
-	`, guildID, since, limit)
+	`, guildID, sinceDate, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -274,28 +295,30 @@ func (d *DB) GetServerTopChannels(guildID string, since time.Time, limit int) ([
 }
 
 // GetUserMessageCount returns the total message count for a user in a guild
-// since [since].
+// since [since]. Uses period_date to filter by time.
 func (d *DB) GetUserMessageCount(guildID, userID string, since time.Time) (int, error) {
+	sinceDate := since.Format("2006-01-02")
 	var count int
 	err := d.QueryRow(`
 		SELECT COALESCE(SUM(count), 0)
 		FROM message_counts
-		WHERE guild_id = ? AND user_id = ? AND last_seen >= ?
-	`, guildID, userID, since).Scan(&count)
+		WHERE guild_id = ? AND user_id = ? AND period_date >= ?
+	`, guildID, userID, sinceDate).Scan(&count)
 	return count, err
 }
 
 // GetServerTopUsers returns the top [limit] users by message count in a guild
-// since [since]. Uses last_seen to filter by time.
+// since [since]. Uses period_date to filter by time.
 func (d *DB) GetServerTopUsers(guildID string, since time.Time, limit int) ([]models.UserActivityStat, error) {
+	sinceDate := since.Format("2006-01-02")
 	rows, err := d.Query(`
 		SELECT user_id, SUM(count) as total
 		FROM message_counts
-		WHERE guild_id = ? AND last_seen >= ?
+		WHERE guild_id = ? AND period_date >= ?
 		GROUP BY user_id
 		ORDER BY total DESC
 		LIMIT ?
-	`, guildID, since, limit)
+	`, guildID, sinceDate, limit)
 	if err != nil {
 		return nil, err
 	}

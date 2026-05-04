@@ -287,3 +287,115 @@ func TestTimeFiltering(t *testing.T) {
 		t.Fatalf("expected 1 emoji with zero time, got %d", len(stats))
 	}
 }
+
+func TestUpsertEmojiUsageAt(t *testing.T) {
+	db, _ := New(t.TempDir() + "/test.db")
+	defer db.Close()
+
+	past := time.Now().Add(-3 * 24 * time.Hour)
+	if err := db.UpsertEmojiUsageAt("guild1", "cool", "123", "user1", "ch1", 1, past); err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	// Verify count is 1
+	stats, err := db.GetUserTopEmojis("guild1", "user1", time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(stats) != 1 || stats[0].Count != 1 {
+		t.Fatalf("expected count 1, got %d", stats[0].Count)
+	}
+
+	// Query with far future should return nothing
+	stats, err = db.GetUserTopEmojis("guild1", "user1", time.Now().Add(24*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("expected 0 emojis with future since, got %d", len(stats))
+	}
+}
+
+func TestUpsertMessageCountAt(t *testing.T) {
+	db, _ := New(t.TempDir() + "/test.db")
+	defer db.Close()
+
+	past := time.Now().Add(-3 * 24 * time.Hour)
+	if err := db.UpsertMessageCountAt("guild1", "ch1", "user1", past); err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	// Verify count is 1
+	count, err := db.GetUserMessageCount("guild1", "user1", time.Time{})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected count 1, got %d", count)
+	}
+
+	// Query with far future should return 0
+	count, err = db.GetUserMessageCount("guild1", "user1", time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 messages with future since, got %d", count)
+	}
+}
+
+func TestTimeFilteringPeriodDate(t *testing.T) {
+	db, _ := New(t.TempDir() + "/test.db")
+	defer db.Close()
+
+	// Insert data at different dates
+	db.UpsertEmojiUsageAt("guild1", "a", "1", "user1", "ch1", 5, time.Now().Add(-3*24*time.Hour))   // 3 days ago
+	db.UpsertEmojiUsageAt("guild1", "b", "2", "user1", "ch1", 10, time.Now().Add(-20*24*time.Hour)) // 20 days ago
+
+	// Query with 7-day window should only return the 3-day-old data
+	stats, err := db.GetUserTopEmojis("guild1", "user1", time.Now().Add(-7*24*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(stats) != 1 || stats[0].EmojiName != "a" || stats[0].Count != 5 {
+		t.Fatalf("expected only 'a' with count 5, got %d results", len(stats))
+	}
+
+	// Query with 30-day window should return both
+	stats, err = db.GetUserTopEmojis("guild1", "user1", time.Now().Add(-30*24*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("expected 2 emojis with 30-day window, got %d", len(stats))
+	}
+
+	// Query with 1-day window should return nothing
+	stats, err = db.GetUserTopEmojis("guild1", "user1", time.Now().Add(-1*24*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("expected 0 emojis with 1-day window, got %d", len(stats))
+	}
+
+	// Test message counts too
+	db.UpsertMessageCountAt("guild1", "ch1", "user1", time.Now().Add(-5*24*time.Hour))
+	db.UpsertMessageCountAt("guild1", "ch1", "user1", time.Now().Add(-15*24*time.Hour))
+
+	count, err := db.GetUserMessageCount("guild1", "user1", time.Now().Add(-7*24*time.Hour))
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 message in 7-day window, got %d", count)
+	}
+
+	count, err = db.GetUserMessageCount("guild1", "user1", time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 messages in 30-day window, got %d", count)
+	}
+}
