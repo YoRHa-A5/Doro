@@ -132,12 +132,12 @@ func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 
 	emojis := emoji.Parse(m.Content)
 	for _, em := range emojis {
-		if err := b.db.UpsertEmojiUsage(m.GuildID, em.Name, em.ID, m.Author.ID, m.ChannelID, 1); err != nil {
+		if err := b.db.UpsertEmojiUsageAt(m.GuildID, em.Name, em.ID, m.Author.ID, m.ChannelID, 1, m.Timestamp); err != nil {
 			log.Printf("Failed to upsert emoji usage: %v", err)
 		}
 	}
 
-	if err := b.db.UpsertMessageCount(m.GuildID, m.ChannelID, m.Author.ID); err != nil {
+	if err := b.db.UpsertMessageCountAt(m.GuildID, m.ChannelID, m.Author.ID, m.Timestamp); err != nil {
 		log.Printf("Failed to upsert message count: %v", err)
 	}
 }
